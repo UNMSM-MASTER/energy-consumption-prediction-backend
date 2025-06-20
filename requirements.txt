@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-dotenv
+firebase-admin
+pydantic
+python-jose[cryptography]
+passlib[bcrypt]
+scikit-learn
+pandas
