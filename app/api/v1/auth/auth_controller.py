@@ -1,4 +1,4 @@
-from fastapi import APIRouter, FastAPI, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 from app.db_models.main import Token, User, UserCreate
 from datetime import timedelta
@@ -52,7 +52,6 @@ async def register_user(user: UserCreate):
         "disabled": False
     }
 
-    # Add to Firestore
     doc_ref = db.collection("users").document()
     doc_ref.set(user_data)
 

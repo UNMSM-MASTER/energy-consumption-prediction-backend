@@ -1,7 +1,7 @@
 from fastapi import FastAPI
-from typing import Union
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.auth.auth_controller import router as auth_api
+from app.api.v1.prediction.prediction_controller import router as recomendation_api
 
 app = FastAPI(title="Osinergmin Energy Recomendation APIs")
 
@@ -16,6 +16,7 @@ app.add_middleware(
 
 
 app.include_router(auth_api)
+app.include_router(recomendation_api)
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
