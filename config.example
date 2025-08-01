@@ -1,0 +1,11 @@
+# Database Configuration
+DATABASE_URL=postgresql://postgres:password@localhost:5432/energy_prediction
+
+# Redis Configuration
+REDIS_URL=redis://localhost:6379
+
+# JWT Configuration
+SECRET_KEY=your-super-secret-key-change-this-in-production
+
+# Application Configuration
+DEBUG=True 

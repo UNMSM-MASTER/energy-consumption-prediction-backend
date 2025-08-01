@@ -1,131 +1,104 @@
-from app.config.firestore import db
-from app.db_models.main import User, PredictionResult, PredictionInput
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
 from typing import List
-from firebase_admin import firestore
-import pandas as pd
-
-from app.utils.main import get_current_active_user
-from app.ml_models.ml_model import MlModel
-from app.api.v1.prediction.services.lang import LagService
 from datetime import datetime
+from app.config.database import get_db
+from app.domain.entities.prediction import PredictionCreate, PredictionResponse
+from app.application.services.prediction_application_service import PredictionApplicationService
+from app.infrastructure.repositories.prediction_repository_impl import PredictionRepositoryImpl
 
-router = APIRouter(
-    prefix="/prediction",
-    tags=["Prediction"],
-    responses={404: {"description": "Not found"}}
-)
+router = APIRouter(prefix="/predictions", tags=["predictions"])
 
-model_loader = MlModel()
-lag_service = LagService()
+def get_prediction_service(db: Session = Depends(get_db)) -> PredictionApplicationService:
+    prediction_repository = PredictionRepositoryImpl(db)
+    return PredictionApplicationService(prediction_repository)
 
-
-@router.post("/predict", response_model=PredictionResult)
-async def make_prediction(
-    input_data: PredictionInput,
-    current_user: User = Depends(get_current_active_user)
+@router.post("/", response_model=PredictionResponse)
+async def create_prediction(
+    prediction_request: PredictionCreate,
+    prediction_service: PredictionApplicationService = Depends(get_prediction_service)
 ):
+    """Create a new energy consumption prediction"""
     try:
-        dt = pd.to_datetime(input_data.datetime)
-        # if dt < datetime.now():
-        #     raise ValueError("La fecha debe ser futura")
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Fecha inválida: {str(e)}")
-
-    try:
-        # Cargar modelo
-        model = model_loader.load_model(input_data.company.upper())
-
-        # Obtener lags predictivos
-        lags, meta = lag_service.get_forecast_lags(
-            input_data.company.upper(),
-            model,
-            dt
+        prediction = await prediction_service.generate_prediction(prediction_request)
+        return PredictionResponse(
+            id=prediction.id,
+            user_id=prediction.user_id,
+            prediction_date=prediction.prediction_date,
+            target_date=prediction.target_date,
+            consumption_prediction=prediction.consumption_prediction,
+            confidence_interval=prediction.confidence_interval,
+            model_version=prediction.model_version,
+            features_used=prediction.features_used,
+            company=prediction.company,
+            created_at=prediction.created_at
         )
-
-        # Preparar features finales
-        features = lag_service._prepare_features(dt, lags)
-
-        # Hacer predicción final
-        prediction = model.predict([features])[0]
-
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Error al predecir: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-    # Preparar respuesta
-    prediction_data = {
-        "input_data": input_data.dict(),
-        "parsed_features": {
-            "hour": dt.hour,
-            "dayofweek": dt.dayofweek,
-            "month": dt.month,
-            "year": dt.year,
-            "is_weekend": 1 if dt.dayofweek >= 5 else 0,
-            "is_peak": 1 if dt.hour in [7, 8, 18, 19] else 0,
-            "lag_1": lags[0],
-            "lag_2": lags[1],
-            "lag_3": lags[2],
-        },
-        "prediction_meta": {
-            "steps": meta['steps'],
-            "last_real_lag_1": meta['last_real']['lag_1'],
-            "last_real_lag_2": meta['last_real']['lag_2'],
-            "last_real_lag_3": meta['last_real']['lag_3'],
-            "forecast_method": "recursive"
-        },
-        "prediction": float(prediction),
-        "created_at": datetime.utcnow().isoformat(),
-        "created_by": current_user.username
-    }
-
-    # Guardar en Firestore
-    doc_ref = db.collection("predictions").document()
-    doc_ref.set(prediction_data)
-
-    return {
-        "prediction_id": doc_ref.id,
-        **prediction_data
-    }
-
-@router.get("/predictions", response_model=List[PredictionResult])
-async def get_predictions(
-    current_user: User = Depends(get_current_active_user),
-    limit: int = 10
+@router.get("/user/{user_id}", response_model=List[PredictionResponse])
+async def get_user_predictions(
+    user_id: int,
+    prediction_service: PredictionApplicationService = Depends(get_prediction_service)
 ):
-    # Get predictions for the current user
-    predictions_ref = db.collection("predictions")
-    query = predictions_ref.where("created_by", "==", current_user.username) \
-                          .order_by("created_at", direction=firestore.Query.DESCENDING) \
-                          .limit(limit)
+    """Get all predictions for a specific user"""
+    try:
+        predictions = await prediction_service.get_user_predictions(user_id)
+        return [
+            PredictionResponse(
+                id=pred.id,
+                user_id=pred.user_id,
+                prediction_date=pred.prediction_date,
+                target_date=pred.target_date,
+                consumption_prediction=pred.consumption_prediction,
+                confidence_interval=pred.confidence_interval,
+                model_version=pred.model_version,
+                features_used=pred.features_used,
+                company=pred.company,
+                created_at=pred.created_at
+            )
+            for pred in predictions
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-    predictions = []
-    for doc in query.stream():
-        pred_data = doc.to_dict()
-        predictions.append({
-            "prediction_id": doc.id,
-            **pred_data
-        })
-
-    return predictions
-
-@router.get("/predictions/{prediction_id}", response_model=PredictionResult)
-async def get_prediction(
-    prediction_id: str,
-    current_user: User = Depends(get_current_active_user)
+@router.get("/date-range/", response_model=List[PredictionResponse])
+async def get_predictions_by_date_range(
+    start_date: datetime,
+    end_date: datetime,
+    prediction_service: PredictionApplicationService = Depends(get_prediction_service)
 ):
-    doc_ref = db.collection("predictions").document(prediction_id)
-    doc = doc_ref.get()
+    """Get predictions within a date range"""
+    try:
+        predictions = await prediction_service.get_predictions_by_date_range(start_date, end_date)
+        return [
+            PredictionResponse(
+                id=pred.id,
+                user_id=pred.user_id,
+                prediction_date=pred.prediction_date,
+                target_date=pred.target_date,
+                consumption_prediction=pred.consumption_prediction,
+                confidence_interval=pred.confidence_interval,
+                model_version=pred.model_version,
+                features_used=pred.features_used,
+                company=pred.company,
+                created_at=pred.created_at
+            )
+            for pred in predictions
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
 
-    if not doc.exists:
-        raise HTTPException(status_code=404, detail="Prediction not found")
-
-    pred_data = doc.to_dict()
-
-    # Check if the prediction belongs to the current user
-    if pred_data["created_by"] != current_user.username:
-        raise HTTPException(status_code=403, detail="Not authorized to access this prediction")
-
-    return {
-        "prediction_id": doc.id,
-        **pred_data
-            }
+@router.delete("/user/{user_id}/cache")
+async def clear_user_cache(
+    user_id: int,
+    prediction_service: PredictionApplicationService = Depends(get_prediction_service)
+):
+    """Clear all cached predictions for a user"""
+    try:
+        await prediction_service.clear_user_cache(user_id)
+        return {"message": f"Cache cleared for user {user_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")

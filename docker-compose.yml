@@ -1,0 +1,46 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/energy_prediction
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=your-secret-key-here
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./app:/app/app
+    networks:
+      - energy-network
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=energy_prediction
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - energy-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - energy-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  energy-network:
+    driver: bridge 
