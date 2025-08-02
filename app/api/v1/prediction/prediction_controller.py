@@ -40,10 +40,16 @@ async def make_prediction(
         raise HTTPException(status_code=400, detail=f"Fecha inválida: {str(e)}")
 
     try:
-        # Configurar timeout específico para predicciones (4 minutos)
+        # Agregar tarea en background para precargar modelo si no está cargado
+        background_tasks.add_task(
+            prediction_use_cases.preload_model_if_needed, 
+            input_data.company
+        )
+        
+        # Configurar timeout específico para predicciones (8 minutos)
         result = await asyncio.wait_for(
             prediction_use_cases.make_prediction(input_data, current_user.username),
-            timeout=240.0  # 4 minutos
+            timeout=480.0  # 8 minutos
         )
         return result
     except asyncio.TimeoutError:
@@ -53,6 +59,8 @@ async def make_prediction(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
 
 @router.get("/predictions", response_model=List[PredictionResult])

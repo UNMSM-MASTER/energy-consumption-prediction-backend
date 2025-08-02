@@ -32,7 +32,7 @@ class MLPredictionService(PredictionService):
             # Cargar modelo desde Firebase Storage usando MlModel con timeout
             model = await asyncio.wait_for(
                 asyncio.to_thread(self.ml_model_loader.load_model, company),
-                timeout=60.0  # 1 minuto timeout para cargar modelo
+                timeout=120.0  # 2 minutos timeout para cargar modelo
             )
             
             # Guardar en cache
@@ -65,7 +65,7 @@ class MLPredictionService(PredictionService):
             # Agregar timeout para cálculo de lags
             lags, meta = await asyncio.wait_for(
                 lag_service.get_forecast_lags(company, model, target_dt),
-                timeout=180.0  # 3 minutos timeout para cálculo de lags
+                timeout=300.0  # 5 minutos timeout para cálculo de lags
             )
             
             # Guardar en cache

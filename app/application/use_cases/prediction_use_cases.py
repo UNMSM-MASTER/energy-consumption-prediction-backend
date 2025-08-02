@@ -97,4 +97,14 @@ class PredictionUseCases:
         if prediction.created_by != username:
             raise ValueError("Not authorized to access this prediction")
             
-        return prediction 
+        return prediction
+
+    async def preload_model_if_needed(self, company: str) -> None:
+        """
+        Precarga el modelo en background si no está cargado
+        """
+        try:
+            await self.prediction_service.load_model(company.upper())
+        except Exception:
+            # Silenciar errores en background task
+            pass 
