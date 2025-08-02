@@ -26,8 +26,8 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 
-# Agregar middleware de timeout (10 minutos para predicciones)
-app.add_middleware(TimeoutMiddleware, timeout=600)
+# Agregar middleware de timeout (15 minutos para predicciones)
+app.add_middleware(TimeoutMiddleware, timeout=900)
 
 # Agregar middleware de logging
 app.middleware("http")(logging_middleware)
@@ -69,11 +69,11 @@ async def detailed_health_check():
         "timestamp": datetime.now().isoformat(),
         "components": {},
         "timeouts": {
-            "nginx": "600s",
-            "fastapi": "600s", 
-            "prediction": "480s",
-            "model_loading": "120s",
-            "lag_calculation": "300s"
+            "nginx": "900s",
+            "fastapi": "900s", 
+            "prediction": "720s",
+            "model_loading": "300s",
+            "lag_calculation": "480s"
         }
     }
     

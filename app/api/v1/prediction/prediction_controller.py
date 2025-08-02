@@ -46,10 +46,10 @@ async def make_prediction(
             input_data.company
         )
         
-        # Configurar timeout específico para predicciones (8 minutos)
+        # Configurar timeout específico para predicciones (12 minutos)
         result = await asyncio.wait_for(
             prediction_use_cases.make_prediction(input_data, current_user.username),
-            timeout=480.0  # 8 minutos
+            timeout=720.0  # 12 minutos
         )
         return result
     except asyncio.TimeoutError:

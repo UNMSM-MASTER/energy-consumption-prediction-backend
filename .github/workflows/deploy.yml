@@ -2,7 +2,7 @@ name: Deploy Energy Prediction API
 
 on:
   push:
-    branches: [ main, logs ]
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       environment:
