@@ -304,4 +304,29 @@ class RedisCacheRepository(CacheRepository):
             raise CacheException(
                 f"Error getting all cache hash {key}: {str(e)}",
                 details={"key": key}
+            )
+
+    async def ping(self) -> bool:
+        """Verificar conexión con Redis"""
+        try:
+            result = await self.redis_client.ping()
+            logger.debug(
+                "Redis ping successful",
+                extra_fields={
+                    "operation": "ping"
+                }
+            )
+            return result
+        except Exception as e:
+            logger.error(
+                "Redis ping failed",
+                extra_fields={
+                    "operation": "ping",
+                    "error": str(e)
+                },
+                exc_info=True
+            )
+            raise CacheException(
+                f"Error pinging Redis: {str(e)}",
+                details={"operation": "ping"}
             ) 
