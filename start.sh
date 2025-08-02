@@ -20,4 +20,4 @@ alembic upgrade head || echo "Migration failed, continuing..."
 
 # Iniciar la aplicación
 echo "Starting FastAPI application..."
-uvicorn main:app --host 0.0.0.0 --port 8000 
+uvicorn main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 600
