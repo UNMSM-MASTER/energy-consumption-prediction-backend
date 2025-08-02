@@ -42,7 +42,7 @@ class StructuredFormatter(logging.Formatter):
         if hasattr(record, 'extra_fields'):
             log_entry.update(record.extra_fields)
         
-        return json.dumps(log_entry, ensure_ascii=False)
+        return json.dumps(log_entry, ensure_ascii=False, default=str)
 
 class ProductionLogger:
     """Logger configurado para producción"""

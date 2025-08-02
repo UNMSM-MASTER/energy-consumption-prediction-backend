@@ -38,7 +38,7 @@ class RedisCacheRepository(CacheRepository):
     async def set(self, key: str, value: Any, expire: int = 3600) -> bool:
         try:
             if isinstance(value, (dict, list)):
-                value = json.dumps(value)
+                value = json.dumps(value, default=str)
             
             await self.redis_client.set(key, value, ex=expire)
             
@@ -177,7 +177,7 @@ class RedisCacheRepository(CacheRepository):
             serialized_mapping = {}
             for field, value in mapping.items():
                 if isinstance(value, (dict, list)):
-                    serialized_mapping[field] = json.dumps(value)
+                    serialized_mapping[field] = json.dumps(value, default=str)
                 else:
                     serialized_mapping[field] = str(value)
             
