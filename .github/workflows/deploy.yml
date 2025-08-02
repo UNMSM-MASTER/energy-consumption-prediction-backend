@@ -58,21 +58,29 @@ jobs:
               echo "✅ Backup created: $BACKUP_DIR/$BACKUP_NAME"
             fi
             
+            # Create project directory if it doesn't exist
+            if [ ! -d "$PROJECT_DIR" ]; then
+              echo "📁 Creating project directory: $PROJECT_DIR"
+              mkdir -p "$PROJECT_DIR"
+            fi
+            
             # Navigate to project directory
             cd "$PROJECT_DIR" || {
-              echo "❌ Project directory not found: $PROJECT_DIR"
+              echo "❌ Cannot access project directory: $PROJECT_DIR"
               exit 1
             }
             
-            # Pull latest changes
+            # Pull latest changes from main branch
             echo "📥 Pulling latest changes from main branch..."
             git fetch origin
             git reset --hard origin/main
             
-            # Check if there are changes
-            if git diff --quiet HEAD~1 HEAD; then
-              echo "ℹ️ No changes detected, skipping deployment"
-              exit 0
+            # Check if docker-compose.yml exists
+            if [ ! -f "docker-compose.yml" ] && [ ! -f "docker-compose.yaml" ]; then
+              echo "❌ docker-compose.yml not found in $PROJECT_DIR"
+              echo "📋 Current directory contents:"
+              ls -la
+              exit 1
             fi
             
             # Copy environment files if they exist
@@ -109,8 +117,10 @@ jobs:
               echo "📋 Container logs:"
               docker-compose logs --tail=50
               echo "🔄 Rolling back to previous version..."
-              cd "$BACKUP_DIR/$BACKUP_NAME"
-              docker-compose up -d
+              if [ -d "$BACKUP_DIR/$BACKUP_NAME" ]; then
+                cd "$BACKUP_DIR/$BACKUP_NAME"
+                docker-compose up -d
+              fi
               exit 1
             fi
             
@@ -121,7 +131,11 @@ jobs:
             
             # Log deployment
             echo "📝 Logging deployment..."
-            echo "$(date): Deployment successful - Commit: $(git rev-parse --short HEAD)" >> "$LOG_DIR/deployments.log"
+            if [ -d ".git" ]; then
+              echo "$(date): Deployment successful - Commit: $(git rev-parse --short HEAD)" >> "$LOG_DIR/deployments.log"
+            else
+              echo "$(date): Deployment successful - Manual deployment" >> "$LOG_DIR/deployments.log"
+            fi
             
             echo "🎉 Deployment completed successfully!"
             echo "📊 Application status:"
@@ -144,6 +158,19 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             echo "🔍 Post-deployment health check..."
+            
+            # Navigate to project directory
+            PROJECT_DIR="/home/${{ secrets.SSH_USERNAME }}/${{ env.PROJECT_NAME }}"
+            cd "$PROJECT_DIR" || {
+              echo "❌ Project directory not found: $PROJECT_DIR"
+              exit 1
+            }
+            
+            # Check if docker-compose.yml exists
+            if [ ! -f "docker-compose.yml" ] && [ ! -f "docker-compose.yaml" ]; then
+              echo "❌ docker-compose.yml not found"
+              exit 1
+            fi
             
             # Wait a bit more for full startup
             sleep 60
