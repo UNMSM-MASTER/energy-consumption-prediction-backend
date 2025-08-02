@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from typing import List, Annotated
 from datetime import datetime
+import asyncio
 
 from app.domain.entities.user import User
 from app.domain.entities.prediction import PredictionResult, PredictionInput
@@ -28,6 +29,7 @@ def get_prediction_use_cases(db=Depends(get_db)) -> PredictionUseCases:
 @router.post("/predict", response_model=PredictionResult)
 async def make_prediction(
     input_data: PredictionInput,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
     prediction_use_cases: PredictionUseCases = Depends(get_prediction_use_cases)
 ):
@@ -38,8 +40,17 @@ async def make_prediction(
         raise HTTPException(status_code=400, detail=f"Fecha inválida: {str(e)}")
 
     try:
-        result = await prediction_use_cases.make_prediction(input_data, current_user.username)
+        # Configurar timeout específico para predicciones (4 minutos)
+        result = await asyncio.wait_for(
+            prediction_use_cases.make_prediction(input_data, current_user.username),
+            timeout=240.0  # 4 minutos
+        )
         return result
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=408, 
+            detail="La predicción está tomando más tiempo del esperado. Por favor, intente nuevamente."
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
