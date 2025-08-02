@@ -1,11 +1,12 @@
 import io
 import logging
+import os
 from firebase_admin import storage
 from google.cloud.exceptions import NotFound
 import joblib
 
 class MlModel:
-    def __init__(self, bucket_name: str = "osinergmin-backend.firebasestorage.app"):
+    def __init__(self, bucket_name: str = "doctoria-pe.firebasestorage.app"):
         """
         Inicializa el cargador de modelos con manejo robusto de errores
 
@@ -47,8 +48,6 @@ class MlModel:
                     model = joblib.load(f)
                 logging.info(f"Modelo {normalized_name} cargado exitosamente")
                 return model
-            # except pickle.UnpicklingError as e:
-            #     raise ValueError(f"Error deserializando el modelo: {str(e)}")
             except Exception as e:
                 raise ValueError(f"Error inesperado al cargar el modelo: {str(e)}")
 

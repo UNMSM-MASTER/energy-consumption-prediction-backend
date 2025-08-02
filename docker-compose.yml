@@ -1,0 +1,64 @@
+version: '3.8'
+
+x-common-env: &common-env
+  DATABASE_URL: ${DATABASE_URL}
+  REDIS_URL: ${REDIS_URL}
+  SECRET_KEY: ${SECRET_KEY}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES}
+  MODELS_PATH: ${MODELS_PATH}
+  FIREBASE_TYPE: ${FIREBASE_TYPE}
+  FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+  FIREBASE_PRIVATE_KEY_ID: ${FIREBASE_PRIVATE_KEY_ID}
+  FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY}
+  FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL}
+  FIREBASE_CLIENT_ID: ${FIREBASE_CLIENT_ID}
+  FIREBASE_AUTH_URI: ${FIREBASE_AUTH_URI}
+  FIREBASE_TOKEN_URI: ${FIREBASE_TOKEN_URI}
+  FIREBASE_AUTH_PROVIDER_X509_CERT_URL: ${FIREBASE_AUTH_PROVIDER_X509_CERT_URL}
+  FIREBASE_CLIENT_X509_CERT_URL: ${FIREBASE_CLIENT_X509_CERT_URL}
+  FIREBASE_UNIVERSE_DOMAIN: ${FIREBASE_UNIVERSE_DOMAIN}
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *common-env
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./ml_models:/app/ml_models
+    networks:
+      - app-network
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=energy_prediction
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge 
