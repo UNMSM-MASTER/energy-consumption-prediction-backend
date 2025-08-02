@@ -129,6 +129,9 @@ jobs:
             cd "$BACKUP_DIR"
             ls -t | tail -n +6 | xargs -r rm -rf
             
+            # Return to project directory
+            cd "$PROJECT_DIR"
+            
             # Log deployment
             echo "📝 Logging deployment..."
             if [ -d ".git" ]; then
