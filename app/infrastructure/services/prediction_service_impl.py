@@ -1,6 +1,7 @@
 from typing import Dict, Any, Tuple, Optional
 from datetime import datetime
 import pandas as pd
+import asyncio
 from app.domain.services.prediction_service import PredictionService
 from app.domain.repositories.cache_repository import CacheRepository
 from app.ml_models.ml_model import MlModel
@@ -10,21 +11,40 @@ class MLPredictionService(PredictionService):
         self.cache_repository = cache_repository
         self.models_cache = {}
         self.ml_model_loader = MlModel()
+        self._loading_models = {}  # Para evitar cargas duplicadas
 
     async def load_model(self, company: str) -> Any:
         # Verificar si el modelo ya está en cache
         if company in self.models_cache:
             return self.models_cache[company]
 
-        # Cargar modelo desde Firebase Storage usando MlModel
+        # Evitar cargas duplicadas
+        if company in self._loading_models:
+            # Esperar a que termine la carga en curso
+            while company in self._loading_models:
+                await asyncio.sleep(0.1)
+            return self.models_cache[company]
+
+        # Marcar como cargando
+        self._loading_models[company] = True
+
         try:
-            model = self.ml_model_loader.load_model(company)
+            # Cargar modelo desde Firebase Storage usando MlModel con timeout
+            model = await asyncio.wait_for(
+                asyncio.to_thread(self.ml_model_loader.load_model, company),
+                timeout=60.0  # 1 minuto timeout para cargar modelo
+            )
             
             # Guardar en cache
             self.models_cache[company] = model
             return model
+        except asyncio.TimeoutError:
+            raise ValueError(f"Timeout loading model for company {company}")
         except Exception as e:
             raise ValueError(f"Error loading model for company {company}: {str(e)}")
+        finally:
+            # Remover marca de carga
+            self._loading_models.pop(company, None)
 
     async def get_forecast_lags(self, company: str, model: Any, target_date: datetime) -> Tuple[list, Dict[str, Any]]:
         # Verificar cache para lags
@@ -42,7 +62,11 @@ class MLPredictionService(PredictionService):
         target_dt = pd.Timestamp(target_date)
         
         try:
-            lags, meta = await lag_service.get_forecast_lags(company, model, target_dt)
+            # Agregar timeout para cálculo de lags
+            lags, meta = await asyncio.wait_for(
+                lag_service.get_forecast_lags(company, model, target_dt),
+                timeout=180.0  # 3 minutos timeout para cálculo de lags
+            )
             
             # Guardar en cache
             await self.cache_repository.set(cache_key, {
@@ -51,6 +75,8 @@ class MLPredictionService(PredictionService):
             }, expire=3600)
 
             return lags, meta
+        except asyncio.TimeoutError:
+            raise ValueError(f"Timeout calculating lags for {company}")
         except Exception as e:
             raise ValueError(f"Error calculating lags for {company}: {str(e)}")
 
@@ -74,8 +100,18 @@ class MLPredictionService(PredictionService):
         
         # Convertir a DataFrame con nombres de columnas para evitar warning
         features_df = pd.DataFrame([features], columns=feature_names)
-        prediction = model.predict(features_df)[0]
-        return float(prediction)
+        
+        try:
+            # Agregar timeout para predicción
+            prediction = await asyncio.wait_for(
+                asyncio.to_thread(model.predict, features_df),
+                timeout=30.0  # 30 segundos timeout para predicción
+            )
+            return float(prediction[0])
+        except asyncio.TimeoutError:
+            raise ValueError("Timeout during prediction")
+        except Exception as e:
+            raise ValueError(f"Error during prediction: {str(e)}")
 
     async def get_cached_prediction(self, cache_key: str) -> Optional[Dict[str, Any]]:
         return await self.cache_repository.get(cache_key)
