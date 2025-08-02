@@ -1,0 +1,269 @@
+name: Deploy Energy Prediction API
+
+on:
+  push:
+    branches: [ main, logs ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+
+env:
+  PROJECT_NAME: energy-consumption-prediction-backend
+  DOCKER_REGISTRY: ghcr.io
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short
+        continue-on-error: true
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  deploy:
+    needs: [test, security-scan]
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            
+            # Variables
+            PROJECT_DIR="/home/${{ secrets.SSH_USERNAME }}/${{ env.PROJECT_NAME }}"
+            BACKUP_DIR="/home/${{ secrets.SSH_USERNAME }}/backups/${{ env.PROJECT_NAME }}"
+            LOG_DIR="/home/${{ secrets.SSH_USERNAME }}/logs/${{ env.PROJECT_NAME }}"
+            
+            echo "🚀 Starting deployment of Energy Prediction API..."
+            echo "📁 Project directory: $PROJECT_DIR"
+            echo "🕐 Deployment time: $(date)"
+            
+            # Create directories if they don't exist
+            mkdir -p "$BACKUP_DIR"
+            mkdir -p "$LOG_DIR"
+            
+            # Backup current deployment
+            if [ -d "$PROJECT_DIR" ]; then
+              echo "📦 Creating backup of current deployment..."
+              BACKUP_NAME="backup-$(date +%Y%m%d-%H%M%S)"
+              cp -r "$PROJECT_DIR" "$BACKUP_DIR/$BACKUP_NAME"
+              echo "✅ Backup created: $BACKUP_DIR/$BACKUP_NAME"
+            fi
+            
+            # Navigate to project directory
+            cd "$PROJECT_DIR" || {
+              echo "❌ Project directory not found: $PROJECT_DIR"
+              exit 1
+            }
+            
+            # Pull latest changes
+            echo "📥 Pulling latest changes from main branch..."
+            git fetch origin
+            git reset --hard origin/main
+            
+            # Check if there are changes
+            if git diff --quiet HEAD~1 HEAD; then
+              echo "ℹ️ No changes detected, skipping deployment"
+              exit 0
+            fi
+            
+            # Copy environment files if they exist
+            if [ -f ".env_prod" ]; then
+              cp .env_prod .env
+              echo "✅ Environment file copied"
+            fi
+            
+            # Stop current containers gracefully
+            echo "🛑 Stopping current containers..."
+            docker-compose down --timeout 30 || true
+            
+            # Remove old images to save space
+            echo "🧹 Cleaning up old Docker images..."
+            docker image prune -f
+            
+            # Build and start new containers
+            echo "🔨 Building new containers..."
+            docker-compose build --no-cache
+            
+            echo "🚀 Starting new containers..."
+            docker-compose up -d
+            
+            # Wait for containers to be healthy
+            echo "⏳ Waiting for containers to be healthy..."
+            sleep 30
+            
+            # Health check
+            echo "🏥 Performing health check..."
+            if curl -f http://localhost:8000/health > /dev/null 2>&1; then
+              echo "✅ Health check passed"
+            else
+              echo "❌ Health check failed"
+              echo "📋 Container logs:"
+              docker-compose logs --tail=50
+              echo "🔄 Rolling back to previous version..."
+              cd "$BACKUP_DIR/$BACKUP_NAME"
+              docker-compose up -d
+              exit 1
+            fi
+            
+            # Clean up old backups (keep last 5)
+            echo "🧹 Cleaning up old backups..."
+            cd "$BACKUP_DIR"
+            ls -t | tail -n +6 | xargs -r rm -rf
+            
+            # Log deployment
+            echo "📝 Logging deployment..."
+            echo "$(date): Deployment successful - Commit: $(git rev-parse --short HEAD)" >> "$LOG_DIR/deployments.log"
+            
+            echo "🎉 Deployment completed successfully!"
+            echo "📊 Application status:"
+            docker-compose ps
+            echo "📋 Recent logs:"
+            docker-compose logs --tail=10
+
+      - name: Notify deployment status
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          channel: '#deployments'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          text: |
+            Energy Prediction API deployment ${{ job.status }}
+            Environment: ${{ github.event.inputs.environment || 'production' }}
+            Commit: ${{ github.sha }}
+            Triggered by: ${{ github.actor }}
+
+  post-deploy:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check deployment health
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            echo "🔍 Post-deployment health check..."
+            
+            # Wait a bit more for full startup
+            sleep 60
+            
+            # Check API health
+            if curl -f http://localhost:8000/health > /dev/null 2>&1; then
+              echo "✅ API is healthy"
+              
+              # Check database connection
+              if docker-compose exec -T postgres pg_isready -U postgres > /dev/null 2>&1; then
+                echo "✅ Database is healthy"
+              else
+                echo "⚠️ Database health check failed"
+              fi
+              
+              # Check Redis connection
+              if docker-compose exec -T redis redis-cli ping > /dev/null 2>&1; then
+                echo "✅ Redis is healthy"
+              else
+                echo "⚠️ Redis health check failed"
+              fi
+              
+            else
+              echo "❌ API health check failed"
+              echo "📋 Recent error logs:"
+              docker-compose logs --tail=20 | grep -i error || echo "No error logs found"
+            fi
+            
+            echo "📊 Final container status:"
+            docker-compose ps
