@@ -18,6 +18,24 @@ echo "Redis is ready!"
 echo "Running database migrations..."
 alembic upgrade head || echo "Migration failed, continuing..."
 
-# Iniciar la aplicación
-echo "Starting FastAPI application..."
-uvicorn main:app --host 0.0.0.0 --port 8000 
+# Precargar modelos ML en segundo plano (opcional, no bloquea el inicio)
+echo "Preloading ML models in background..."
+python scripts/preload_models.py &
+PRELOAD_PID=$!
+
+# Iniciar la aplicación con configuraciones de timeout optimizadas
+echo "Starting FastAPI application with optimized timeout settings..."
+uvicorn main:app \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --workers 2 \
+  --timeout-keep-alive 300 \
+  --timeout-graceful-shutdown 300 \
+  --limit-concurrency 100 \
+  --limit-max-requests 1000 \
+  --backlog 2048
+
+# Si la aplicación se detiene, terminar el proceso de precarga
+if [ ! -z "$PRELOAD_PID" ]; then
+  kill $PRELOAD_PID 2>/dev/null || true
+fi 
